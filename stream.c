@@ -329,92 +329,123 @@ main()
     /*	--- MAIN LOOP --- repeat test cases NTIMES times --- */
 
     scalar = 3.0;
-    for (k=0; k<NTIMES; k++)
-	{
-        /* Sequential Pattern */
+
+    /* Sequential Pattern */
+    for (k=0; k<NTIMES; k++) {
         times[0][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[j];
         times[0][k] = mysecond() - times[0][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[1][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) b[j] = scalar*c[j];
         times[1][k] = mysecond() - times[1][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[2][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[j]+b[j];
         times[2][k] = mysecond() - times[2][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[3][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) a[j] = b[j]+scalar*c[j];
         times[3][k] = mysecond() - times[3][k];
+    }
 
-        /* Gather Pattern */
+    /* Gather Pattern */
+    for (k=0; k<NTIMES; k++) {
         times[4][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[idx[j]];
         times[4][k] = mysecond() - times[4][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[5][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) b[j] = scalar*c[idx[j]];
         times[5][k] = mysecond() - times[5][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[6][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[idx[j]]+b[idx[j]];
         times[6][k] = mysecond() - times[6][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[7][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) a[j] = b[idx[j]]+scalar*c[idx[j]];
         times[7][k] = mysecond() - times[7][k];
+    }
 
-        /* Scatter Pattern */
+    /* Scatter Pattern */
+    for (k=0; k<NTIMES; k++) {
         times[8][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[j];
         times[8][k] = mysecond() - times[8][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[9][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) b[idx[j]] = scalar*c[j];
         times[9][k] = mysecond() - times[9][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[10][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[j]+b[j];
         times[10][k] = mysecond() - times[10][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[11][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) a[idx[j]] = b[j]+scalar*c[j];
         times[11][k] = mysecond() - times[11][k];
+    }
 
-        /* Scatter-Gather Pattern */
+    /* Scatter-Gather Pattern */
+    for (k=0; k<NTIMES; k++) {
         times[12][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[idx[j]];
         times[12][k] = mysecond() - times[12][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[13][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) b[idx[j]] = scalar*c[idx[j]];
         times[13][k] = mysecond() - times[13][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[14][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[idx[j]]+b[idx[j]];
         times[14][k] = mysecond() - times[14][k];
+    }
 
+    for (k=0; k<NTIMES; k++) {
         times[15][k] = mysecond();
 #pragma omp parallel for
         for (j=0; j<STREAM_ARRAY_SIZE; j++) a[idx[j]] = b[idx[j]]+scalar*c[idx[j]];
         times[15][k] = mysecond() - times[15][k];
-	}
+    }
+
 
     /*	--- SUMMARY --- */
 
@@ -533,32 +564,30 @@ void checkSTREAMresults ()
 	aj = 2.0E0 * aj;
     /* now execute timing loop */
 	scalar = 3.0;
-	for (k=0; k<NTIMES; k++)
-        {
-            /* Sequential */
-            cj = aj;
-            bj = scalar*cj;
-            cj = aj+bj;
-            aj = bj+scalar*cj;
+    /* Sequential */
+    cj = aj; // Copy runs NTIMES
+    bj = scalar*cj; // Scale runs NTIMES
+    cj = aj+bj; // Add runs NTIMES
+    aj = bj+scalar*cj; // Triad runs NTIMES
 
-            /* Gather */
-            cj = aj;
-            bj = scalar*cj;
-            cj = aj+bj;
-            aj = bj+scalar*cj;
+    /* Gather */
+    cj = aj; 
+    bj = scalar*cj; 
+    cj = aj+bj; 
+    aj = bj+scalar*cj; 
 
-            /* Scatter */
-            cj = aj;
-            bj = scalar*cj;
-            cj = aj+bj;
-            aj = bj+scalar*cj;
+    /* Scatter */
+    cj = aj; 
+    bj = scalar*cj; 
+    cj = aj+bj; 
+    aj = bj+scalar*cj; 
 
-            /* Scatter-Gather */
-            cj = aj;
-            bj = scalar*cj;
-            cj = aj+bj;
-            aj = bj+scalar*cj;
-        }
+    /* Scatter-Gather */
+    cj = aj; 
+    bj = scalar*cj; 
+    cj = aj+bj; 
+    aj = bj+scalar*cj; 
+
 
     /* accumulate deltas between observed and expected results */
 	aSumErr = 0.0;
