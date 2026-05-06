@@ -46,6 +46,7 @@
 # include <float.h>
 # include <limits.h>
 # include <sys/time.h>
+# include <stdlib.h>
 
 /*-----------------------------------------------------------------------
  * INSTRUCTIONS:
@@ -176,22 +177,25 @@
 #define STREAM_TYPE double
 #endif
 
+#define NUM_PATTERNS 4
+#define NUM_OPS 4
+#define NUM_KERNELS (NUM_PATTERNS * NUM_OPS)
+
 static STREAM_TYPE	a[STREAM_ARRAY_SIZE+OFFSET],
 			b[STREAM_ARRAY_SIZE+OFFSET],
 			c[STREAM_ARRAY_SIZE+OFFSET];
+static ssize_t      idx[STREAM_ARRAY_SIZE+OFFSET];
 
-static double	avgtime[4] = {0}, maxtime[4] = {0},
-		mintime[4] = {FLT_MAX,FLT_MAX,FLT_MAX,FLT_MAX};
+static double	avgtime[NUM_KERNELS] = {0}, maxtime[NUM_KERNELS] = {0},
+		mintime[NUM_KERNELS] = {[0 ... NUM_KERNELS-1] = FLT_MAX};
 
-static char	*label[4] = {"Copy:      ", "Scale:     ",
-    "Add:       ", "Triad:     "};
+static char *pattern_labels[NUM_PATTERNS] = {"Sequential", "Gather", "Scatter", "ScatterGather"};
+static char *op_labels[NUM_OPS] = {"Copy", "Scale", "Add", "Triad"};
 
-static double	bytes[4] = {
-    2 * sizeof(STREAM_TYPE) * STREAM_ARRAY_SIZE,
-    2 * sizeof(STREAM_TYPE) * STREAM_ARRAY_SIZE,
-    3 * sizeof(STREAM_TYPE) * STREAM_ARRAY_SIZE,
-    3 * sizeof(STREAM_TYPE) * STREAM_ARRAY_SIZE
-    };
+static char label[NUM_KERNELS][32];
+
+static double	bytes[NUM_KERNELS];
+
 
 extern double mysecond();
 extern void checkSTREAMresults();
@@ -209,10 +213,22 @@ main()
     {
     int			quantum, checktick();
     int			BytesPerWord;
-    int			k;
+    int			k, p, o;
     ssize_t		j;
     STREAM_TYPE		scalar;
-    double		t, times[4][NTIMES];
+    double		t, times[NUM_KERNELS][NTIMES];
+
+    /* Initialize labels and bytes */
+    for (p = 0; p < NUM_PATTERNS; p++) {
+        for (o = 0; o < NUM_OPS; o++) {
+            int k_idx = p * NUM_OPS + o;
+            sprintf(label[k_idx], "%s-%s", pattern_labels[p], op_labels[o]);
+            
+            double b_count = (o < 2 ? 2.0 : 3.0) * sizeof(STREAM_TYPE);
+            if (p > 0) b_count += sizeof(ssize_t); // Add index overhead for G, S, SG
+            bytes[k_idx] = b_count * STREAM_ARRAY_SIZE;
+        }
+    }
 
     /* --- SETUP --- determine precision and check timing --- */
 
@@ -269,7 +285,16 @@ main()
 	    a[j] = 1.0;
 	    b[j] = 2.0;
 	    c[j] = 0.0;
+        idx[j] = j;
 	}
+
+    /* Randomly shuffle idx array for scatter/gather */
+    for (j = STREAM_ARRAY_SIZE - 1; j > 0; j--) {
+        ssize_t target = rand() % (j + 1);
+        ssize_t tmp = idx[j];
+        idx[j] = idx[target];
+        idx[target] = tmp;
+    }
 
     printf(HLINE);
 
@@ -306,52 +331,96 @@ main()
     scalar = 3.0;
     for (k=0; k<NTIMES; k++)
 	{
-	times[0][k] = mysecond();
-#ifdef TUNED
-        tuned_STREAM_Copy();
-#else
+        /* Sequential Pattern */
+        times[0][k] = mysecond();
 #pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    c[j] = a[j];
-#endif
-	times[0][k] = mysecond() - times[0][k];
-	
-	times[1][k] = mysecond();
-#ifdef TUNED
-        tuned_STREAM_Scale(scalar);
-#else
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[j];
+        times[0][k] = mysecond() - times[0][k];
+
+        times[1][k] = mysecond();
 #pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    b[j] = scalar*c[j];
-#endif
-	times[1][k] = mysecond() - times[1][k];
-	
-	times[2][k] = mysecond();
-#ifdef TUNED
-        tuned_STREAM_Add();
-#else
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) b[j] = scalar*c[j];
+        times[1][k] = mysecond() - times[1][k];
+
+        times[2][k] = mysecond();
 #pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    c[j] = a[j]+b[j];
-#endif
-	times[2][k] = mysecond() - times[2][k];
-	
-	times[3][k] = mysecond();
-#ifdef TUNED
-        tuned_STREAM_Triad(scalar);
-#else
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[j]+b[j];
+        times[2][k] = mysecond() - times[2][k];
+
+        times[3][k] = mysecond();
 #pragma omp parallel for
-	for (j=0; j<STREAM_ARRAY_SIZE; j++)
-	    a[j] = b[j]+scalar*c[j];
-#endif
-	times[3][k] = mysecond() - times[3][k];
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) a[j] = b[j]+scalar*c[j];
+        times[3][k] = mysecond() - times[3][k];
+
+        /* Gather Pattern */
+        times[4][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[idx[j]];
+        times[4][k] = mysecond() - times[4][k];
+
+        times[5][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) b[j] = scalar*c[idx[j]];
+        times[5][k] = mysecond() - times[5][k];
+
+        times[6][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[j] = a[idx[j]]+b[idx[j]];
+        times[6][k] = mysecond() - times[6][k];
+
+        times[7][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) a[j] = b[idx[j]]+scalar*c[idx[j]];
+        times[7][k] = mysecond() - times[7][k];
+
+        /* Scatter Pattern */
+        times[8][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[j];
+        times[8][k] = mysecond() - times[8][k];
+
+        times[9][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) b[idx[j]] = scalar*c[j];
+        times[9][k] = mysecond() - times[9][k];
+
+        times[10][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[j]+b[j];
+        times[10][k] = mysecond() - times[10][k];
+
+        times[11][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) a[idx[j]] = b[j]+scalar*c[j];
+        times[11][k] = mysecond() - times[11][k];
+
+        /* Scatter-Gather Pattern */
+        times[12][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[idx[j]];
+        times[12][k] = mysecond() - times[12][k];
+
+        times[13][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) b[idx[j]] = scalar*c[idx[j]];
+        times[13][k] = mysecond() - times[13][k];
+
+        times[14][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) c[idx[j]] = a[idx[j]]+b[idx[j]];
+        times[14][k] = mysecond() - times[14][k];
+
+        times[15][k] = mysecond();
+#pragma omp parallel for
+        for (j=0; j<STREAM_ARRAY_SIZE; j++) a[idx[j]] = b[idx[j]]+scalar*c[idx[j]];
+        times[15][k] = mysecond() - times[15][k];
 	}
 
     /*	--- SUMMARY --- */
 
     for (k=1; k<NTIMES; k++) /* note -- skip first iteration */
 	{
-	for (j=0; j<4; j++)
+	for (j=0; j<NUM_KERNELS; j++)
 	    {
 	    avgtime[j] = avgtime[j] + times[j][k];
 	    mintime[j] = MIN(mintime[j], times[j][k]);
@@ -359,17 +428,34 @@ main()
 	    }
 	}
     
-    printf("Function    Best Rate MB/s  Avg time     Min time     Max time\n");
-    for (j=0; j<4; j++) {
+    printf("Function                        Best Rate MB/s  Avg time     Min time     Max time\n");
+    for (j=0; j<NUM_KERNELS; j++) {
 		avgtime[j] = avgtime[j]/(double)(NTIMES-1);
 
-		printf("%s%12.1f  %11.6f  %11.6f  %11.6f\n", label[j],
+		printf("%-30s%12.1f  %11.6f  %11.6f  %11.6f\n", label[j],
 	       1.0E-06 * bytes[j]/mintime[j],
 	       avgtime[j],
 	       mintime[j],
 	       maxtime[j]);
     }
     printf(HLINE);
+
+    /* Output to CSV as a 2D matrix */
+    FILE *fp = fopen("stream_matrix.csv", "w");
+    if (fp) {
+        fprintf(fp, "Pattern/Op,Copy,Scale,Add,Triad\n");
+        for (p = 0; p < NUM_PATTERNS; p++) {
+            fprintf(fp, "%s", pattern_labels[p]);
+            for (o = 0; o < NUM_OPS; o++) {
+                int k_idx = p * NUM_OPS + o;
+                fprintf(fp, ",%.1f", 1.0E-06 * bytes[k_idx]/mintime[k_idx]);
+            }
+            fprintf(fp, "\n");
+        }
+        fclose(fp);
+        printf("Matrix results written to stream_matrix.csv\n");
+        printf(HLINE);
+    }
 
     /* --- Check Results --- */
     checkSTREAMresults();
@@ -449,6 +535,25 @@ void checkSTREAMresults ()
 	scalar = 3.0;
 	for (k=0; k<NTIMES; k++)
         {
+            /* Sequential */
+            cj = aj;
+            bj = scalar*cj;
+            cj = aj+bj;
+            aj = bj+scalar*cj;
+
+            /* Gather */
+            cj = aj;
+            bj = scalar*cj;
+            cj = aj+bj;
+            aj = bj+scalar*cj;
+
+            /* Scatter */
+            cj = aj;
+            bj = scalar*cj;
+            cj = aj+bj;
+            aj = bj+scalar*cj;
+
+            /* Scatter-Gather */
             cj = aj;
             bj = scalar*cj;
             cj = aj+bj;
