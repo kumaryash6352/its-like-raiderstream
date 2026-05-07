@@ -181,10 +181,15 @@
 #define NUM_OPS 4
 #define NUM_KERNELS (NUM_PATTERNS * NUM_OPS)
 
+#ifdef USE_MALLOC
+static STREAM_TYPE	*a, *b, *c;
+static ssize_t		*idx;
+#else
 static STREAM_TYPE	a[STREAM_ARRAY_SIZE+OFFSET],
 			b[STREAM_ARRAY_SIZE+OFFSET],
 			c[STREAM_ARRAY_SIZE+OFFSET];
 static ssize_t      idx[STREAM_ARRAY_SIZE+OFFSET];
+#endif
 
 static double	avgtime[NUM_KERNELS] = {0}, maxtime[NUM_KERNELS] = {0},
 		mintime[NUM_KERNELS] = {[0 ... NUM_KERNELS-1] = FLT_MAX};
@@ -217,6 +222,18 @@ main()
     ssize_t		j;
     STREAM_TYPE		scalar;
     double		t, times[NUM_KERNELS][NTIMES];
+
+#ifdef USE_MALLOC
+    a = (STREAM_TYPE *) malloc((STREAM_ARRAY_SIZE+OFFSET) * sizeof(STREAM_TYPE));
+    b = (STREAM_TYPE *) malloc((STREAM_ARRAY_SIZE+OFFSET) * sizeof(STREAM_TYPE));
+    c = (STREAM_TYPE *) malloc((STREAM_ARRAY_SIZE+OFFSET) * sizeof(STREAM_TYPE));
+    idx = (ssize_t *) malloc((STREAM_ARRAY_SIZE+OFFSET) * sizeof(ssize_t));
+
+    if (a == NULL || b == NULL || c == NULL || idx == NULL) {
+        printf("malloc failed\n");
+        exit(1);
+    }
+#endif
 
     /* Initialize labels and bytes */
     for (p = 0; p < NUM_PATTERNS; p++) {
@@ -491,6 +508,13 @@ main()
     /* --- Check Results --- */
     checkSTREAMresults();
     printf(HLINE);
+
+#ifdef USE_MALLOC
+    free(a);
+    free(b);
+    free(c);
+    free(idx);
+#endif
 
     return 0;
 }
